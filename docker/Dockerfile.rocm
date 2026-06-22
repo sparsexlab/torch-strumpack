@@ -1,0 +1,43 @@
+# Build STRUMPACK + the torch-strumpack extension on top of the official
+# rocm/pytorch image (torch+rocm and the ROCm toolchain are already matched,
+# which removes the ABI-alignment problem).
+#
+# Multi-arch fat binary: gfx1100 = RDNA3 (local 780M debug, via override),
+# gfx90a = MI200, gfx942 = MI300 (blind-compiled datacenter targets).
+ARG BASE=rocm/pytorch:rocm7.2.4_ubuntu24.04_py3.12_pytorch_release_2.10.0
+FROM ${BASE}
+
+ARG HIP_ARCHS="gfx1100;gfx90a;gfx942"
+
+# --- system deps for STRUMPACK (no-MPI, OpenMP + HIP) ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        cmake ninja-build gfortran git \
+        libopenblas-dev liblapack-dev libmetis-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- STRUMPACK: sequential (no MPI) + HIP GPU offload ---
+WORKDIR /opt
+RUN git clone --depth 1 https://github.com/pghysels/STRUMPACK.git
+WORKDIR /opt/STRUMPACK/build
+RUN cmake .. -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/opt/strumpack \
+        -DSTRUMPACK_USE_MPI=OFF \
+        -DSTRUMPACK_USE_OPENMP=ON \
+        -DSTRUMPACK_USE_HIP=ON \
+        -DCMAKE_HIP_ARCHITECTURES="${HIP_ARCHS}" \
+        -DTPL_ENABLE_METIS=ON \
+    && ninja -j"$(nproc)" && ninja install
+
+ENV STRUMPACK_DIR=/opt/strumpack
+ENV LD_LIBRARY_PATH=/opt/strumpack/lib:${LD_LIBRARY_PATH}
+
+# --- build the torch-strumpack extension against this STRUMPACK ---
+WORKDIR /workspace/torch-strumpack
+COPY . .
+# nanobind extension build lands here once src/ is written:
+#   pip install -e . --no-build-isolation
+# For now the package imports the SciPy stand-in; the compiled _core_hip
+# replaces it behind the same factor/solve/solve_transpose signatures.
+
+CMD ["/bin/bash"]
