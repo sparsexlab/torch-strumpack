@@ -27,6 +27,9 @@ find_package(rocblas QUIET)
 find_package(rocsolver QUIET)
 find_package(rocsparse QUIET)
 
+# CUDA deps that STRUMPACK's CUDA build links (CUDA::cublas, CUDA::cusolver, ...)
+find_package(CUDAToolkit QUIET)
+
 # STRUMPACK (pass -DSTRUMPACK_DIR=/opt/strumpack/lib/cmake/STRUMPACK)
 find_package(STRUMPACK REQUIRED)
 

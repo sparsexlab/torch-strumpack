@@ -33,10 +33,15 @@ Roadmap:
 1. ✅ Architecture — pure primitives + autograd split, gradcheck-verified.
 2. ✅ Real STRUMPACK **CPU** build (USE_HIP=OFF) — no ROCm dependency, gradcheck-verified.
 3. ✅ Real STRUMPACK **ROCm** build (USE_HIP=ON, gfx1100) — GPU offload confirmed on
-   Radeon 780M (gfx1103 via override), gradcheck-verified.
-4. ⬜ CUDA build (validate on NVIDIA).
+   Radeon 780M (gfx1103 via override), machine precision.
+4. ✅ Real STRUMPACK **CUDA** build (USE_CUDA=ON, sm_89) — GPU offload confirmed on
+   RTX 4070 Ti SUPER, machine precision. (WSL note: prepend `/usr/lib/wsl/lib` to
+   `LD_LIBRARY_PATH` so the real libcuda is used, not the distro stub.)
 5. ⬜ Multi-arch ROCm wheels: add gfx90a (MI200) / gfx942 (MI300), blind-compiled.
-6. ⬜ Package wheels (`torch-strumpack` cpu / `torch-strumpack-rocm`).
+6. ⬜ Package wheels (`torch-strumpack` cpu / `-rocm` / `-cuda`).
+
+One `CMakeLists.txt` covers all three: it finds whichever of ROCm / CUDA deps
+exist (all `QUIET`) and links the STRUMPACK build you point it at.
 
 ## Design
 
