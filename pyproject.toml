@@ -21,3 +21,6 @@ dev = ["pytest", "scipy"]
 
 [tool.setuptools.packages.find]
 include = ["torch_strumpack*"]
+
+[tool.setuptools.package-data]
+torch_strumpack = ["*.so"]

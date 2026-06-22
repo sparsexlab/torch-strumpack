@@ -2,8 +2,7 @@ __pycache__/
 *.egg-info/
 *.so
 build/
+build_ext*/
 dist/
 .pytest_cache/
-build_ext/
-*.so
 src/__pycache__/
