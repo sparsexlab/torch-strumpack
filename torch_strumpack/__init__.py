@@ -23,18 +23,12 @@ solve_transpose = _core.solve_transpose
 
 
 def is_available() -> bool:
-    """Whether the solver can run in this environment.
+    """Whether the compiled STRUMPACK extension is loadable here.
 
-    Mirrors ``torch_amgx.is_available()`` so a torch-sla backend adapter can
-    gate on it the same way. The real package will probe the compiled
-    extension and the active device (CUDA vs ROCm via ``torch.version.hip``).
+    True only when the real solver is present -- there is no scipy/other
+    stand-in, so a True here always means STRUMPACK.
     """
-    try:
-        import scipy.sparse.linalg  # noqa: F401
-
-        return True
-    except ImportError:
-        return False
+    return _core._ext is not None
 
 
 __all__ = [

@@ -24,17 +24,19 @@ x.sum().backward()     # backward: one transpose solve, reuses the factorization
 
 ## Status
 
-**Architecture skeleton.** The numeric core is currently a SciPy SuperLU stand-in so the
-API, the primitive/autograd split, and the adjoint are validated (`pytest` + `gradcheck`).
-The compiled STRUMPACK extension drops in behind the same `_core` signatures with no change
-above it.
+**Real STRUMPACK, no fallback.** The solver is the compiled STRUMPACK extension and
+nothing else — there is deliberately **no scipy/other stand-in**. If the extension is
+missing, every call raises loudly, so you can never mistake a stand-in for STRUMPACK.
+(scipy appears only in the test-suite, as a correctness oracle.)
 
 Roadmap:
-1. ✅ CPU skeleton — pure primitives + autograd, gradcheck-verified.
-2. ⬜ Real STRUMPACK (CPU).
-3. ⬜ CUDA build (validate on NVIDIA).
-4. ⬜ ROCm build — local debug on RDNA3 (Radeon 780M, gfx1103 via override),
-   blind multi-arch wheels for MI200 (gfx90a) / MI300 (gfx942).
+1. ✅ Architecture — pure primitives + autograd split, gradcheck-verified.
+2. ✅ Real STRUMPACK **CPU** build (USE_HIP=OFF) — no ROCm dependency, gradcheck-verified.
+3. ✅ Real STRUMPACK **ROCm** build (USE_HIP=ON, gfx1100) — GPU offload confirmed on
+   Radeon 780M (gfx1103 via override), gradcheck-verified.
+4. ⬜ CUDA build (validate on NVIDIA).
+5. ⬜ Multi-arch ROCm wheels: add gfx90a (MI200) / gfx942 (MI300), blind-compiled.
+6. ⬜ Package wheels (`torch-strumpack` cpu / `torch-strumpack-rocm`).
 
 ## Design
 

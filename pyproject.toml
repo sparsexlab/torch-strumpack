@@ -13,11 +13,11 @@ authors = [{ name = "walkerchi" }]
 dependencies = [
     "torch>=2.1",
     "numpy",
-    "scipy",  # skeleton stand-in; dropped once the compiled STRUMPACK ext lands
 ]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+# scipy is used ONLY as a correctness oracle in the test-suite, never as a solver.
+dev = ["pytest", "scipy"]
 
 [tool.setuptools.packages.find]
 include = ["torch_strumpack*"]
