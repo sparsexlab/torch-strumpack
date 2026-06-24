@@ -39,7 +39,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.10", "3.11", "3.12"]
+        python: ["3.10", "3.11", "3.12", "3.13"]
     env:
       STRUMPACK_BACKEND: cpu
       STRUMPACK_PREFIX: /opt/strumpack
@@ -71,6 +71,9 @@ jobs:
       - name: Build + repair + tag wheel
         env:
           STRUMPACK_DIR: /opt/strumpack/lib/cmake/STRUMPACK
+          # Build the .cpu wheel against CPU torch so installing it into a
+          # torch+cpu venv does NOT pull/replace it with a CUDA torch.
+          TORCH_INDEX_URL: https://download.pytorch.org/whl/cpu
         run: bash scripts/ci_build_wheel.sh cpu
 
       - uses: actions/upload-artifact@v4
@@ -89,7 +92,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.10", "3.11", "3.12"]
+        python: ["3.10", "3.11", "3.12", "3.13"]
         cuda: ["12.4"]   # cu12.x; covers torch>=2.4
     env:
       STRUMPACK_BACKEND: cuda
@@ -154,7 +157,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.10", "3.11", "3.12"]
+        python: ["3.10", "3.11", "3.12", "3.13"]
     env:
       STRUMPACK_BACKEND: rocm
       STRUMPACK_PREFIX: /opt/strumpack

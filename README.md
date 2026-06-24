@@ -11,8 +11,13 @@ self-contained wheel per backend; pick the one matching your hardware and instal
 it by URL. CPU math deps (OpenBLAS / METIS / libgomp) are bundled; GPU runtimes
 (CUDA / ROCm) are provided by your driver install.
 
+The `0_cpu` wheel is built against **CPU PyTorch**. To keep `pip` from pulling a
+CUDA torch when it resolves the `torch` dependency, install CPU torch from the
+PyTorch CPU index first (or into a fresh `torch+cpu` venv):
+
 ```bash
 # CPU (no GPU runtime needed), Linux x86_64, CPython 3.12
+pip install torch --index-url https://download.pytorch.org/whl/cpu
 pip install https://github.com/sparsexlab/torch-strumpack/releases/download/v0.0.1.dev0/torch_strumpack-0.0.1.dev0-0_cpu-cp312-cp312-manylinux_2_28_x86_64.whl
 
 # NVIDIA CUDA 12.x, Linux x86_64, CPython 3.12
@@ -22,8 +27,8 @@ pip install https://github.com/sparsexlab/torch-strumpack/releases/download/v0.0
 pip install https://github.com/sparsexlab/torch-strumpack/releases/download/v0.0.1.dev0/torch_strumpack-0.0.1.dev0-0_rocm6x-cp312-cp312-manylinux_2_35_x86_64.whl
 ```
 
-Wheels are built for CPython 3.10 / 3.11 / 3.12 — swap `cp312` for `cp310` /
-`cp311` as needed. Browse all assets on the
+Wheels are built for CPython 3.10 / 3.11 / 3.12 / 3.13 — swap `cp312` for
+`cp310` / `cp311` / `cp313` as needed. Browse all assets on the
 [Releases page](https://github.com/sparsexlab/torch-strumpack/releases). The
 filename build tag (`0_cpu` / `0_cuda12x` / `0_rocm6x`) marks the backend.
 

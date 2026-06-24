@@ -23,8 +23,17 @@ fi
 echo "==> python: $PYEXE ($($PYEXE --version 2>&1))"
 
 "$PYEXE" -m pip install --upgrade pip wheel build auditwheel
-# nanobind + torch headers are needed to compile the extension.
-"$PYEXE" -m pip install nanobind "torch>=2.1" numpy
+# nanobind + torch headers are needed to compile the extension. The cpu
+# backend MUST link against CPU torch (the default PyPI torch pulls a CUDA
+# build, which would (a) bloat the build env and (b) make the .cpu wheel
+# install drag a CUDA torch into a torch+cpu venv). TORCH_INDEX_URL lets the
+# caller pin the torch wheel index, e.g. https://download.pytorch.org/whl/cpu
+"$PYEXE" -m pip install nanobind numpy
+if [ -n "${TORCH_INDEX_URL:-}" ]; then
+  "$PYEXE" -m pip install --index-url "$TORCH_INDEX_URL" "torch>=2.1"
+else
+  "$PYEXE" -m pip install "torch>=2.1"
+fi
 
 # Make the freshly built STRUMPACK + its math deps discoverable at link &
 # repair time.
