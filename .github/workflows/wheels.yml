@@ -133,6 +133,19 @@ jobs:
           dnf install -y "cuda-toolkit-${CU/./-}" || dnf install -y cuda-toolkit
           echo "/usr/local/cuda/bin" >> "$GITHUB_PATH"
           echo "CUDACXX=/usr/local/cuda/bin/nvcc" >> "$GITHUB_ENV"
+          # CUDA 12.4's nvcc rejects gcc > 13 ("unsupported GNU version"), but
+          # the manylinux_2_28 image's default toolchain is gcc-toolset-14.
+          # Install gcc-toolset-13 and pin nvcc's host compiler to it.
+          dnf install -y gcc-toolset-13 gcc-toolset-13-gcc-gfortran || \
+          yum install -y gcc-toolset-13 gcc-toolset-13-gcc-gfortran
+          GT13=/opt/rh/gcc-toolset-13/root/usr/bin
+          echo "CUDAHOSTCXX=$GT13/g++" >> "$GITHUB_ENV"
+          # Build STRUMPACK's C/C++/Fortran with the gcc-13 toolset too, so the
+          # CUDA device build and the host objects use a consistent compiler.
+          echo "CC=$GT13/gcc" >> "$GITHUB_ENV"
+          echo "CXX=$GT13/g++" >> "$GITHUB_ENV"
+          echo "FC=$GT13/gfortran" >> "$GITHUB_ENV"
+          echo "CMAKE_Fortran_COMPILER=$GT13/gfortran" >> "$GITHUB_ENV"
 
       - name: Build STRUMPACK (CUDA)
         run: bash scripts/build_strumpack.sh
@@ -198,7 +211,8 @@ jobs:
           # NOT the math libs, so pull the dev packages STRUMPACK's HIP build
           # links against (these are preinstalled only in the -complete image).
           apt-get install -y --no-install-recommends \
-            rocsparse-dev rocsolver-dev hipblas-dev rocblas-dev hipsparse-dev
+            rocsparse-dev rocsolver-dev hipblas-dev rocblas-dev hipsparse-dev \
+            rocprim-dev rocthrust-dev hipcub-dev
 
       - name: Setup Python ${{ matrix.python }}
         uses: actions/setup-python@v5
@@ -275,6 +289,14 @@ jobs:
           PYBIN: ""   # use the setup-python interpreter on PATH
           # Build the .cpu wheel against CPU torch (mac wheels are CPU-only).
           TORCH_INDEX_URL: https://download.pytorch.org/whl/cpu
+          # The python.org CPython from setup-python is a universal2 build, so
+          # `build` would stamp the wheel `..._universal2`. But the extension is
+          # single-arch (built on this runner), and delocate 0.13 hard-errors:
+          # "Failed to find any binary with the required architecture: 'x86_64'".
+          # Pin the wheel platform tag + compiler to this runner's arch so the
+          # wheel is tagged macosx_<ver>_<arch> (arm64 / x86_64), not universal2.
+          _PYTHON_HOST_PLATFORM: macosx-${{ matrix.deployment }}-${{ matrix.arch }}
+          ARCHFLAGS: -arch ${{ matrix.arch }}
         run: bash scripts/ci_build_wheel.sh cpu
 
       - uses: actions/upload-artifact@v4
