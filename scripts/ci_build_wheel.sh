@@ -70,11 +70,29 @@ if [ "$UNAME" = "Darwin" ]; then
 fi
 
 # --- compile the extension into the package dir via CMake -----------
+# On macOS the STRUMPACK config does find_dependency(OpenMP); AppleClang needs
+# Homebrew libomp to satisfy it. Surface those flags so find_package(OpenMP)
+# succeeds for the C/CXX extension (STRUMPACK itself uses Fortran OpenMP).
+EXTRA_CMAKE_ARGS=()
+if [ "$UNAME" = "Darwin" ]; then
+  LIBOMP_PREFIX="$(brew --prefix libomp 2>/dev/null || true)"
+  if [ -n "$LIBOMP_PREFIX" ]; then
+    EXTRA_CMAKE_ARGS+=(
+      -DOpenMP_C_FLAGS="-Xpreprocessor -fopenmp -I$LIBOMP_PREFIX/include"
+      -DOpenMP_CXX_FLAGS="-Xpreprocessor -fopenmp -I$LIBOMP_PREFIX/include"
+      -DOpenMP_C_LIB_NAMES=omp
+      -DOpenMP_CXX_LIB_NAMES=omp
+      -DOpenMP_omp_LIBRARY="$LIBOMP_PREFIX/lib/libomp.dylib"
+    )
+  fi
+fi
+
 BUILD_DIR="build_ext"
 rm -rf "$BUILD_DIR"
 cmake -S . -B "$BUILD_DIR" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DPython_EXECUTABLE="$PYEXE" \
+  ${EXTRA_CMAKE_ARGS[@]+"${EXTRA_CMAKE_ARGS[@]}"} \
   -DSTRUMPACK_DIR="${STRUMPACK_DIR:?set STRUMPACK_DIR}"
 cmake --build "$BUILD_DIR" -j"$NJOBS"
 cmake --install "$BUILD_DIR"          # drops _strumpack_ext*.so into torch_strumpack/

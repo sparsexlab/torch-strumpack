@@ -51,11 +51,18 @@ jobs:
         run: |
           set -e
           # manylinux_2_28 == AlmaLinux 8. EPEL provides metis + openblas.
+          # NOTE: do NOT install EL8 `ninja-build` (1.8.2) — CMake's Ninja
+          # generator needs Ninja >= 1.10 to build STRUMPACK's Fortran sources.
+          # The pypa image already ships a modern ninja via pip (use that).
           dnf install -y epel-release || yum install -y epel-release
-          dnf install -y ninja-build gcc-gfortran cmake \
+          dnf install -y gcc-gfortran cmake \
                           openblas-devel lapack-devel metis-devel || \
-          yum install -y ninja-build gcc-gfortran cmake \
+          yum install -y gcc-gfortran cmake \
                           openblas-devel lapack-devel metis-devel
+          # modern ninja (>= 1.10) from PyPI, onto PATH for cmake -G Ninja
+          /opt/python/cp312-cp312/bin/python -m pip install --upgrade ninja
+          ln -sf /opt/python/cp312-cp312/bin/ninja /usr/local/bin/ninja
+          ninja --version
 
       - name: Build STRUMPACK (CPU)
         run: bash scripts/build_strumpack.sh
@@ -105,11 +112,16 @@ jobs:
       - name: Install native build deps
         run: |
           set -e
+          # See cpu_linux: EL8 ninja-build (1.8.2) is too old for STRUMPACK's
+          # Fortran sources (CMake Ninja generator needs >= 1.10); use pip ninja.
           dnf install -y epel-release || yum install -y epel-release
-          dnf install -y ninja-build gcc-gfortran cmake \
+          dnf install -y gcc-gfortran cmake \
                           openblas-devel lapack-devel metis-devel || \
-          yum install -y ninja-build gcc-gfortran cmake \
+          yum install -y gcc-gfortran cmake \
                           openblas-devel lapack-devel metis-devel
+          /opt/python/cp312-cp312/bin/python -m pip install --upgrade ninja
+          ln -sf /opt/python/cp312-cp312/bin/ninja /usr/local/bin/ninja
+          ninja --version
 
       - name: Install CUDA toolkit ${{ matrix.cuda }}
         run: |
@@ -153,7 +165,13 @@ jobs:
   rocm_linux:
     name: rocm / linux / py${{ matrix.python }}
     runs-on: ubuntu-22.04
-    container: rocm/dev-ubuntu-22.04:6.2.4-complete
+    # NOTE: use the SLIM base image (~1GB), not `-complete` (~5.5GB). The
+    # complete image's ROCm math libs unpack to >30GB and overflow the
+    # ubuntu-22.04 runner's root disk -> "no space left on device" at
+    # container init (job never even starts). The base image ships the HIP
+    # compiler + the ROCm apt repo, so we apt-install only the math/dev
+    # libs STRUMPACK actually links (rocsparse/rocsolver/hipblas/rocblas).
+    container: rocm/dev-ubuntu-22.04:6.2.4
     strategy:
       fail-fast: false
       matrix:
@@ -176,7 +194,11 @@ jobs:
             git cmake ninja-build gfortran \
             libopenblas-dev liblapack-dev libmetis-dev \
             python3-pip patchelf software-properties-common
-          # rocsparse/rocsolver/hipblas come with the rocm *-complete image.
+          # The base rocm/dev image has the HIP compiler + ROCm apt repo but
+          # NOT the math libs, so pull the dev packages STRUMPACK's HIP build
+          # links against (these are preinstalled only in the -complete image).
+          apt-get install -y --no-install-recommends \
+            rocsparse-dev rocsolver-dev hipblas-dev rocblas-dev hipsparse-dev
 
       - name: Setup Python ${{ matrix.python }}
         uses: actions/setup-python@v5
@@ -228,10 +250,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install native build deps (gcc/gfortran, openblas, metis, ninja)
+      - name: Install native build deps (gcc/gfortran, openblas, metis, libomp, ninja)
         run: |
           set -e
-          brew install gcc openblas metis ninja cmake || true
+          # libomp: STRUMPACK builds with OpenMP, so its installed CMake config
+          # does find_dependency(OpenMP). The binding extension is compiled with
+          # AppleClang, which needs Homebrew libomp to satisfy find_package(OpenMP)
+          # (otherwise: "Could NOT find OpenMP_C / OpenMP_CXX").
+          brew install gcc openblas metis libomp ninja cmake || true
           # surface the Homebrew gfortran for build_strumpack.sh autodetection
           ls -1 "$(brew --prefix)"/bin/gfortran* || true
 
