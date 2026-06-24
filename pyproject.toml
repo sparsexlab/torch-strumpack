@@ -23,4 +23,5 @@ dev = ["pytest", "scipy"]
 include = ["torch_strumpack*"]
 
 [tool.setuptools.package-data]
-torch_strumpack = ["*.so"]
+# .so  -> Linux + macOS CPython extension; .pyd/.dll -> Windows (future job).
+torch_strumpack = ["*.so", "*.pyd", "*.dll"]

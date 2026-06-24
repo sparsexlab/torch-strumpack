@@ -200,13 +200,98 @@ jobs:
           name: wheel-rocm-linux-py${{ matrix.python }}
           path: dist-final/*.whl
 
+  # ------------------------------------------------------------------ #
+  # CPU wheels — macOS (arm64 macos-14 + x86_64 macos-13).              #
+  # Homebrew supplies gcc (=> gfortran, which STRUMPACK hard-requires), #
+  # openblas (BLAS+LAPACK) and metis. STRUMPACK is built no-MPI /       #
+  # OpenMP-only, then delocate bundles the dylibs and stamps the        #
+  # macosx_<ver>_<arch> platform tag so these wheels don't collide      #
+  # with the linux cpu wheels as Release assets.                        #
+  # ------------------------------------------------------------------ #
+  cpu_macos:
+    name: cpu / macos-${{ matrix.arch }} / py${{ matrix.python }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # full cross-product of {arm64 macos-14, x86_64 macos-13} x {py3.10..13}
+        arch: [arm64, x86_64]
+        python: ["3.10", "3.11", "3.12", "3.13"]
+        include:
+          - { arch: arm64,  runner: macos-14, deployment: "14.0" }
+          - { arch: x86_64, runner: macos-13, deployment: "13.0" }
+    env:
+      STRUMPACK_BACKEND: cpu
+      STRUMPACK_PREFIX: ${{ github.workspace }}/strumpack-prefix
+      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.deployment }}
+      PY: ${{ matrix.python }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install native build deps (gcc/gfortran, openblas, metis, ninja)
+        run: |
+          set -e
+          brew install gcc openblas metis ninja cmake || true
+          # surface the Homebrew gfortran for build_strumpack.sh autodetection
+          ls -1 "$(brew --prefix)"/bin/gfortran* || true
+
+      - name: Setup Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Build STRUMPACK (CPU, no-MPI, OpenMP)
+        run: bash scripts/build_strumpack.sh
+
+      - name: Build + repair (delocate) + tag wheel
+        env:
+          STRUMPACK_DIR: ${{ github.workspace }}/strumpack-prefix/lib/cmake/STRUMPACK
+          PYBIN: ""   # use the setup-python interpreter on PATH
+          # Build the .cpu wheel against CPU torch (mac wheels are CPU-only).
+          TORCH_INDEX_URL: https://download.pytorch.org/whl/cpu
+        run: bash scripts/ci_build_wheel.sh cpu
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-cpu-macos-${{ matrix.arch }}-py${{ matrix.python }}
+          path: dist-final/*.whl
+
   # ================================================================== #
-  # Windows / macOS CPU — DISABLED until the BLAS/LAPACK+METIS          #
-  # toolchain is wired up. Kept here as the explicit next step rather   #
-  # than a silently-missing target. To enable, add a job that:         #
-  #   * installs OpenBLAS+METIS (vcpkg on Windows, brew on macOS),      #
-  #   * runs scripts/build_strumpack.sh,                                #
-  #   * builds the wheel and repairs with delvewheel / delocate.        #
+  # Windows CPU — DISABLED. STRUMPACK hard-requires a Fortran compiler  #
+  # (project(STRUMPACK LANGUAGES CXX C Fortran) + bundled LAPACK .f     #
+  # sources) and MSVC has none. Mixing a MinGW/Intel-Fortran STRUMPACK  #
+  # with the MSVC-built nanobind extension + MSVC torch is an unsolved  #
+  # ABI problem on the windows-2022 runner. A scaffold lives in         #
+  # scripts/build_strumpack.ps1 / scripts/build_wheel.ps1 for whoever   #
+  # lands a MinGW (or Intel oneAPI ifx) toolchain; re-enable then.      #
+  #                                                                     #
+  # # windows-cpu: STRUMPACK Fortran+METIS+BLAS via MSVC unresolved —   #
+  # #              needs a MinGW (or Intel ifx) Fortran toolchain.      #
+  # cpu_windows:                                                        #
+  #   name: cpu / windows / py${{ matrix.python }}                      #
+  #   runs-on: windows-2022                                             #
+  #   strategy:                                                         #
+  #     fail-fast: false                                                #
+  #     matrix:                                                         #
+  #       python: ["3.10", "3.11", "3.12", "3.13"]                      #
+  #   env:                                                              #
+  #     STRUMPACK_BACKEND: cpu                                          #
+  #     STRUMPACK_PREFIX: ${{ github.workspace }}\strumpack-prefix      #
+  #   steps:                                                            #
+  #     - uses: actions/checkout@v4                                     #
+  #     - name: Install BLAS/LAPACK + METIS (vcpkg)                     #
+  #       run: vcpkg install openblas metis                             #
+  #     - name: Setup Python                                            #
+  #       uses: actions/setup-python@v5                                 #
+  #       with: { python-version: "${{ matrix.python }}" }              #
+  #     - name: Build STRUMPACK (CPU)                                   #
+  #       run: pwsh scripts/build_strumpack.ps1                         #
+  #     - name: Build + delvewheel + tag                                #
+  #       run: pwsh scripts/build_wheel.ps1 cpu                         #
+  #     - uses: actions/upload-artifact@v4                              #
+  #       with:                                                         #
+  #         name: wheel-cpu-windows-py${{ matrix.python }}              #
+  #         path: dist-final/*.whl                                      #
   # ================================================================== #
 
   # ------------------------------------------------------------------ #
@@ -214,7 +299,7 @@ jobs:
   # ------------------------------------------------------------------ #
   publish:
     name: Attach wheels to GitHub Release
-    needs: [cpu_linux, cuda_linux, rocm_linux]
+    needs: [cpu_linux, cuda_linux, rocm_linux, cpu_macos]
     if: always() && (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     permissions:
