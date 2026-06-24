@@ -85,9 +85,18 @@ if [ "$BACKEND_TAG" = "rocm6x" ]; then
   [ -x "$HIPCXX" ] || HIPCXX="$(command -v hipcc || echo "$ROCM_PATH/bin/hipcc")"
   [ -x "$HIPCC" ]  || HIPCC="$(command -v hipcc || echo "$ROCM_PATH/bin/hipcc")"
   echo "==> ROCm extension C/C++ compiler: CXX=$HIPCXX CC=$HIPCC"
+  # Make $ROCM_PATH discoverable so the extension's find_package(hip/rocthrust/
+  # rocsparse/...) resolves the imported targets (roc::rocthrust et al.) that
+  # STRUMPACK::strumpack links transitively, mirroring how build_strumpack.sh
+  # configured the STRUMPACK build. Append (don't -D-override CMAKE_PREFIX_PATH,
+  # which would clobber the STRUMPACK $PREFIX set on the env var above); the
+  # CMakeLists also list(APPEND)s $ROCM_PATH for belt-and-suspenders.
+  export ROCM_PATH
+  export CMAKE_PREFIX_PATH="$ROCM_PATH:${CMAKE_PREFIX_PATH:-}"
   EXTRA_CMAKE_ARGS+=(
     -DCMAKE_C_COMPILER="$HIPCC"
     -DCMAKE_CXX_COMPILER="$HIPCXX"
+    -DCMAKE_HIP_COMPILER="$HIPCXX"
   )
 fi
 if [ "$UNAME" = "Darwin" ]; then
