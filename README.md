@@ -4,6 +4,29 @@ Differentiable sparse **direct** solver for PyTorch, portable across **CPU / CUD
 backed by [STRUMPACK](https://github.com/pghysels/STRUMPACK). Fills the AMD gap that
 cuDSS (NVIDIA-only) leaves — a drop-in differentiable `A x = b` that also runs on Radeon / MI GPUs.
 
+## Install
+
+Wheels are published to **GitHub Releases** (not PyPI). Each release carries one
+self-contained wheel per backend; pick the one matching your hardware and install
+it by URL. CPU math deps (OpenBLAS / METIS / libgomp) are bundled; GPU runtimes
+(CUDA / ROCm) are provided by your driver install.
+
+```bash
+# CPU (no GPU runtime needed), Linux x86_64, CPython 3.12
+pip install https://github.com/sparsexlab/torch-strumpack/releases/download/v0.0.1.dev0/torch_strumpack-0.0.1.dev0-0_cpu-cp312-cp312-manylinux_2_28_x86_64.whl
+
+# NVIDIA CUDA 12.x, Linux x86_64, CPython 3.12
+pip install https://github.com/sparsexlab/torch-strumpack/releases/download/v0.0.1.dev0/torch_strumpack-0.0.1.dev0-0_cuda12x-cp312-cp312-manylinux_2_28_x86_64.whl
+
+# AMD ROCm 6.x, Linux x86_64, CPython 3.12
+pip install https://github.com/sparsexlab/torch-strumpack/releases/download/v0.0.1.dev0/torch_strumpack-0.0.1.dev0-0_rocm6x-cp312-cp312-manylinux_2_35_x86_64.whl
+```
+
+Wheels are built for CPython 3.10 / 3.11 / 3.12 — swap `cp312` for `cp310` /
+`cp311` as needed. Browse all assets on the
+[Releases page](https://github.com/sparsexlab/torch-strumpack/releases). The
+filename build tag (`0_cpu` / `0_cuda12x` / `0_rocm6x`) marks the backend.
+
 Usable two ways:
 
 - **Standalone** — `torch_strumpack.spsolve(A, b)`, autograd included.
@@ -38,7 +61,9 @@ Roadmap:
    RTX 4070 Ti SUPER, machine precision. (WSL note: prepend `/usr/lib/wsl/lib` to
    `LD_LIBRARY_PATH` so the real libcuda is used, not the distro stub.)
 5. ⬜ Multi-arch ROCm wheels: add gfx90a (MI200) / gfx942 (MI300), blind-compiled.
-6. ⬜ Package wheels (`torch-strumpack` cpu / `-rocm` / `-cuda`).
+6. ✅ Package wheels — CI builds CPU / CUDA / ROCm wheels (py 3.10–3.12) and
+   attaches them to the GitHub Release (see `.github/workflows/wheels.yml` and
+   the **Install** section above).
 
 One `CMakeLists.txt` covers all three: it finds whichever of ROCm / CUDA deps
 exist (all `QUIET`) and links the STRUMPACK build you point it at.
