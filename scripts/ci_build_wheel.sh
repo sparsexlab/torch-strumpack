@@ -74,6 +74,22 @@ fi
 # Homebrew libomp to satisfy it. Surface those flags so find_package(OpenMP)
 # succeeds for the C/CXX extension (STRUMPACK itself uses Fortran OpenMP).
 EXTRA_CMAKE_ARGS=()
+# ROCm: STRUMPACK::strumpack transitively carries the hip::device INTERFACE,
+# which adds `-x hip` to the extension's C++ compile. The image-default GNU g++
+# rejects that ("language hip not recognized"), so compile the extension with
+# the ROCm clang too (matches how build_strumpack.sh built STRUMPACK).
+if [ "$BACKEND_TAG" = "rocm6x" ]; then
+  : "${ROCM_PATH:=/opt/rocm}"
+  HIPCXX="$ROCM_PATH/llvm/bin/amdclang++"
+  HIPCC="$ROCM_PATH/llvm/bin/amdclang"
+  [ -x "$HIPCXX" ] || HIPCXX="$(command -v hipcc || echo "$ROCM_PATH/bin/hipcc")"
+  [ -x "$HIPCC" ]  || HIPCC="$(command -v hipcc || echo "$ROCM_PATH/bin/hipcc")"
+  echo "==> ROCm extension C/C++ compiler: CXX=$HIPCXX CC=$HIPCC"
+  EXTRA_CMAKE_ARGS+=(
+    -DCMAKE_C_COMPILER="$HIPCC"
+    -DCMAKE_CXX_COMPILER="$HIPCXX"
+  )
+fi
 if [ "$UNAME" = "Darwin" ]; then
   LIBOMP_PREFIX="$(brew --prefix libomp 2>/dev/null || true)"
   if [ -n "$LIBOMP_PREFIX" ]; then

@@ -109,9 +109,25 @@ case "$BACKEND" in
   rocm)
     : "${ROCM_PATH:=/opt/rocm}"
     export ROCM_PATH
+    # STRUMPACK's HIP build does NOT tag its .cpp sources as LANGUAGE HIP; it
+    # links roc::hip* whose hip::device INTERFACE adds `-x hip` (+ -D__HIP_
+    # PLATFORM_AMD__) to every C++ compile. If CMAKE_CXX_COMPILER is GNU g++
+    # (the image default /usr/bin/c++), that flag fails with
+    # `c++: error: language hip not recognized`. So compile all C/C++ with the
+    # ROCm clang (amdclang/amdclang++), which understands `-x hip`. Fortran
+    # stays gfortran (HIP clang has no Fortran frontend). Prefer the explicit
+    # amdclang binaries; fall back to hipcc.
+    HIPCXX="$ROCM_PATH/llvm/bin/amdclang++"
+    HIPCC="$ROCM_PATH/llvm/bin/amdclang"
+    [ -x "$HIPCXX" ] || HIPCXX="$(command -v hipcc || echo "$ROCM_PATH/bin/hipcc")"
+    [ -x "$HIPCC" ]  || HIPCC="$(command -v hipcc || echo "$ROCM_PATH/bin/hipcc")"
+    echo "==> ROCm C/C++ compiler: CXX=$HIPCXX CC=$HIPCC"
     CMAKE_ARGS+=(
       -DSTRUMPACK_USE_CUDA=OFF
       -DSTRUMPACK_USE_HIP=ON
+      -DCMAKE_C_COMPILER="$HIPCC"
+      -DCMAKE_CXX_COMPILER="$HIPCXX"
+      -DCMAKE_HIP_COMPILER="$HIPCXX"
       -DCMAKE_HIP_ARCHITECTURES="${HIP_ARCHS:-gfx90a;gfx942;gfx1100}"
       -DCMAKE_PREFIX_PATH="$ROCM_PATH"
     )
