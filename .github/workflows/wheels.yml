@@ -250,12 +250,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # full cross-product of {arm64 macos-14, x86_64 macos-13} x {py3.10..13}
-        arch: [arm64, x86_64]
+        # Apple Silicon only. GitHub is retiring the Intel macOS (macos-13 /
+        # x86_64) runners, so those jobs queue indefinitely and never get a
+        # runner; arm64 (macos-14) covers current Macs. Re-add x86_64 if a
+        # working Intel macOS runner becomes available again.
+        arch: [arm64]
         python: ["3.10", "3.11", "3.12", "3.13"]
         include:
           - { arch: arm64,  runner: macos-14, deployment: "14.0" }
-          - { arch: x86_64, runner: macos-13, deployment: "13.0" }
     env:
       STRUMPACK_BACKEND: cpu
       STRUMPACK_PREFIX: ${{ github.workspace }}/strumpack-prefix
