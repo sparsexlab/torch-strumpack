@@ -40,7 +40,7 @@ Cross-platform wheel matrix
      - CPU (``0_cpu``)
      - 3.10 / 3.11 / 3.12 / 3.13
      - none (CPU-only)
-     - building via CI
+     - ✓ available
    * - **macOS** arm64
      - CPU (``0_cpu``)
      - 3.10 / 3.11 / 3.12 / 3.13
@@ -60,14 +60,15 @@ wheels are published for CPython 3.10–3.13. STRUMPACK is built from source per
 backend (GCC/gfortran + OpenBLAS/LAPACK + METIS, plus CUDA or HIP) and bundled
 with ``auditwheel``.
 
-**Windows** (x86_64, CPU) — supported. STRUMPACK builds natively on Windows
-with the **clang-cl** C/C++ compiler and the **flang** Fortran compiler
-(conda-forge LLVM toolchain), linked against MSVC-built PyTorch. The build is
-proven on a real Windows box — a clean-environment solve reaches residual
-``1.69e-16``. The prebuilt **Windows CPU wheel is being produced by CI** and
-will appear on the Releases page alongside the Linux and macOS wheels; until it
-lands you can also build it yourself with the same clang-cl + flang recipe (see
-``.github/workflows/wheels.yml`` for the exact toolchain and CMake flags).
+**Windows** (x86_64, CPU) — supported, **wheels available**. STRUMPACK builds
+natively on Windows with the **clang-cl** C/C++ compiler and the **flang**
+Fortran compiler (conda-forge LLVM toolchain), linked against MSVC-built
+PyTorch. The prebuilt **Windows CPU wheels are published on the Releases page**
+for CPython 3.10–3.13 (``win_amd64``); the STRUMPACK / OpenBLAS / METIS DLLs are
+bundled with ``delvewheel``, and each wheel is CI smoke-tested (import +
+``is_available()`` + a real sparse solve). You can also build it yourself with
+the same clang-cl + flang recipe (see ``.github/workflows/wheels.yml`` for the
+exact toolchain and CMake flags).
 
 **macOS** (arm64, CPU) — supported. The CPU wheel is published for CPython
 3.10–3.13 (clang + gfortran + OpenBLAS/METIS, bundled with ``delocate``).
@@ -105,6 +106,13 @@ Install examples
    # AMD ROCm 6.x, Linux x86_64, CPython 3.12
    pip install --no-deps \
      https://github.com/sparsexlab/torch-strumpack/releases/download/v0.0.1.dev0/torch_strumpack-0.0.1.dev0-0_rocm6x-cp312-cp312-manylinux_2_35_x86_64.whl
+
+.. code-block:: powershell
+
+   # CPU, Windows x86_64, CPython 3.12
+   pip install torch --index-url https://download.pytorch.org/whl/cpu
+   pip install --no-deps `
+     https://github.com/sparsexlab/torch-strumpack/releases/download/v0.0.1.dev0/torch_strumpack-0.0.1.dev0-0_cpu-cp312-cp312-win_amd64.whl
 
 Wheels are built for CPython 3.10 / 3.11 / 3.12 / 3.13 — swap ``cp312`` for
 ``cp310`` / ``cp311`` / ``cp313`` as needed.
