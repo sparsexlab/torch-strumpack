@@ -1,0 +1,21 @@
+# Read the Docs build configuration for torch-strumpack.
+#
+# The RTD builder has no GPU and no STRUMPACK library, so the compiled native
+# extension (torch_strumpack._strumpack_ext) cannot be built or imported. We do
+# NOT pip-install the package (that would try to build the native lib and
+# fail). Instead docs/source/conf.py adds the repo root to sys.path and mocks
+# the compiled extension via autodoc_mock_imports, so autodoc imports the
+# pure-Python package and documents the real public API. A CPU torch is
+# installed so torch types resolve during autodoc.
+version: 2
+
+build:
+  os: ubuntu-24.04
+  tools:
+    python: "3.11"
+  commands:
+    # autodoc imports torch_strumpack -> torch; the CPU wheel keeps the build light.
+    - pip install torch --index-url https://download.pytorch.org/whl/cpu
+    - pip install numpy sphinx furo
+    # sys.path + autodoc_mock_imports (in conf.py) replace installing the package.
+    - python -m sphinx -b html docs/source $READTHEDOCS_OUTPUT/html
