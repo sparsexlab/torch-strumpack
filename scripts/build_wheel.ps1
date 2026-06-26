@@ -42,6 +42,13 @@ if ($LASTEXITCODE -ne 0) { throw "pip install torch failed" }
 $PyExe = (Get-Command python).Source
 Write-Host "==> python: $PyExe"
 Write-Host "==> clang-cl: $ClangCl"
+# Forward-slash every path handed to cmake -D. On Windows, backslash paths are
+# re-parsed as escape sequences by CMake (e.g. \M in C:\Miniconda) -> "Invalid
+# character escape". CMake accepts '/' everywhere on Windows.
+$PyExeFwd       = $PyExe.Replace('\','/')
+$ClangClFwd     = $ClangCl.Replace('\','/')
+$CondaFwd       = $Conda.Replace('\','/')
+$StrumpackDirFwd = $env:STRUMPACK_DIR.Replace('\','/')
 # Build the cmake args as an array and splat. (Backtick-continued inline args
 # with a $(...) subexpression mis-parse under pwsh and pass e.g. the literal
 # string '$ClangCl' through to CMake -> 'is not a full path'.)
@@ -50,12 +57,12 @@ $extArgs = @(
   "-B", "build_ext",
   "-G", "Ninja",
   "-DCMAKE_BUILD_TYPE=Release",
-  "-DCMAKE_C_COMPILER=$ClangCl",
-  "-DCMAKE_CXX_COMPILER=$ClangCl",
+  "-DCMAKE_C_COMPILER=$ClangClFwd",
+  "-DCMAKE_CXX_COMPILER=$ClangClFwd",
   "-DCMAKE_LINKER=link",
-  "-DPython_EXECUTABLE=$PyExe",
-  "-DSTRUMPACK_DIR=$env:STRUMPACK_DIR",
-  "-DCMAKE_PREFIX_PATH=$Conda\Library"
+  "-DPython_EXECUTABLE=$PyExeFwd",
+  "-DSTRUMPACK_DIR=$StrumpackDirFwd",
+  "-DCMAKE_PREFIX_PATH=$CondaFwd/Library"
 )
 Remove-Item -Recurse -Force build_ext -ErrorAction SilentlyContinue
 cmake @extArgs
