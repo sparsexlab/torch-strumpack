@@ -1,0 +1,86 @@
+name: Windows wheel (debug)
+
+# Fast-iteration, Windows-ONLY workflow. The real cpu_windows job lives in
+# wheels.yml, but that workflow also launches the ~24h CUDA/ROCm Linux jobs,
+# which keeps per-job logs unavailable until the whole run finishes. This
+# workflow runs ONLY the Windows CPU build (single Python) so its logs are
+# downloadable within minutes. Manual dispatch only; delete once the Windows
+# wheel is green and folded into wheels.yml's regular runs.
+
+on:
+  workflow_dispatch:
+    inputs:
+      python:
+        description: "CPython version to build"
+        required: false
+        default: "3.12"
+
+permissions:
+  contents: read
+
+jobs:
+  cpu_windows:
+    name: cpu / windows / py${{ github.event.inputs.python }}
+    runs-on: windows-2022
+    env:
+      STRUMPACK_BACKEND: cpu
+      STRUMPACK_PREFIX: ${{ github.workspace }}\strumpack-prefix
+      STRUMPACK_SRC: ${{ github.workspace }}\STRUMPACK
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up MSVC (link.exe + CRT)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Set up Miniconda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          channels: conda-forge
+          channel-priority: strict
+          activate-environment: strumpack-win
+          python-version: ${{ github.event.inputs.python }}
+
+      - name: Install build toolchain + math TPLs (conda-forge)
+        run: |
+          conda install -y -n strumpack-win -c conda-forge `
+            cmake ninja flang flang_win-64 flang-rt_win-64 `
+            openblas liblapack metis llvm-openmp
+          Write-Host "=== conda toolchain ==="
+          conda list -n strumpack-win | Select-String -Pattern "flang|openblas|liblapack|metis|llvm-openmp|clang|cmake|ninja"
+          Write-Host "=== Library\bin compilers ==="
+          Get-ChildItem "$env:CONDA_PREFIX\Library\bin\clang-cl.exe","$env:CONDA_PREFIX\Library\bin\flang.exe" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_.FullName }
+          Write-Host "=== Library\lib (blas/metis) ==="
+          Get-ChildItem "$env:CONDA_PREFIX\Library\lib" -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "openblas|lapack|metis" } | ForEach-Object { Write-Host $_.Name }
+
+      - name: Install Python build deps (CPU torch + nanobind + delvewheel)
+        run: |
+          python -m pip install --upgrade pip wheel build delvewheel nanobind numpy
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu "torch>=2.1"
+
+      - name: Build STRUMPACK (CPU, clang-cl + flang)
+        run: pwsh scripts/build_strumpack.ps1
+
+      - name: Build + delvewheel + tag wheel
+        env:
+          STRUMPACK_DIR: ${{ github.workspace }}\strumpack-prefix\lib\cmake\STRUMPACK
+          TORCH_INDEX_URL: https://download.pytorch.org/whl/cpu
+        run: pwsh scripts/build_wheel.ps1 cpu
+
+      - name: Smoke-test the wheel
+        run: |
+          $whl = Get-ChildItem dist-final\*.whl | Select-Object -First 1
+          python -m pip install --no-deps $whl.FullName
+          python -c "import torch_strumpack as ts; print('version', ts.__version__); print('available', ts.is_available()); assert ts.is_available(), 'extension did not load'"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wheel-cpu-windows-debug-py${{ github.event.inputs.python }}
+          path: dist-final/*.whl
+          if-no-files-found: ignore

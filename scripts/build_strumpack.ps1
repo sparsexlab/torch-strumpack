@@ -73,7 +73,7 @@ foreach ($exe in @($ClangCl, $Flang)) {
 # MSVC link.exe (for the CRT + import libs). clang-cl needs the LLVM Windows
 # runtime libs on the linker path (clang_rt.*); they live in clang's
 # lib\windows. CMAKE_LINKER=link uses MSVC link with that extra LIBPATH.
-$ClangLibWin = (Get-ChildItem -Recurse -Filter "clang_rt.builtins-x86_64.lib" "$LlvmBin\..\lib" -ErrorAction SilentlyContinue |
+$ClangLibWin = (Get-ChildItem -Recurse -Filter "clang_rt.builtins-x86_64.lib" "$Conda\Library" -ErrorAction SilentlyContinue |
                 Select-Object -First 1)
 $ClangLibDir = if ($ClangLibWin) { $ClangLibWin.Directory.FullName } else { "$Conda\Library\lib\clang\windows" }
 Write-Host "    clang runtime lib dir: $ClangLibDir"
