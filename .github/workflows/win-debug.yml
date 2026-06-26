@@ -77,7 +77,30 @@ jobs:
         run: |
           $whl = Get-ChildItem dist-final\*.whl | Select-Object -First 1
           python -m pip install --no-deps $whl.FullName
-          python -c "import torch_strumpack as ts; print('version', ts.__version__); print('available', ts.is_available()); assert ts.is_available(), 'extension did not load'"
+          # Import from a neutral CWD so the *installed* package (with the
+          # delvewheel DLL loader) is used, not the source torch_strumpack\.
+          Push-Location $env:TEMP
+          python -c @'
+          import torch_strumpack as ts
+          from torch_strumpack import _core
+          print('version', ts.__version__)
+          print('available', ts.is_available())
+          if _core._ext is None:
+              import traceback
+              print('=== _strumpack_ext import error ===')
+              traceback.print_exception(type(_core._EXT_ERR), _core._EXT_ERR, _core._EXT_ERR.__traceback__)
+              raise SystemExit('extension did not load')
+          # small solve: 3x3 SPD, check residual
+          import torch
+          A = torch.tensor([[4.,1.,0.],[1.,3.,1.],[0.,1.,2.]], dtype=torch.float64)
+          b = torch.tensor([1.,2.,3.], dtype=torch.float64)
+          x = ts.spsolve(A.to_sparse_csr(), b)
+          r = (A @ x - b).norm().item()
+          print('solve residual', r)
+          assert r < 1e-10, f'residual too large: {r}'
+          print('OK: import + is_available + solve all pass')
+          '@
+          Pop-Location
 
       - uses: actions/upload-artifact@v4
         if: always()
