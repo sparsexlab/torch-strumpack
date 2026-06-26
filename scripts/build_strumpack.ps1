@@ -44,7 +44,7 @@ if (-not (Test-Path "$Src\.git")) {
 $numericPatchTargets = @(
   "src\sparse\CSRGraph.cpp",
   "src\sparse\fronts\Front.cpp",
-  "src\sparse\MatrixReordering.cpp",
+  "src\sparse\ordering\MatrixReordering.cpp",
   "src\clustering\Clustering.hpp",
   "src\dense\DenseMatrix.cpp",
   "src\BLR\BLRMatrix.cpp"
