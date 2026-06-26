@@ -358,6 +358,7 @@ jobs:
       - name: Install build toolchain + math TPLs (conda-forge)
         run: |
           conda install -y -n strumpack-win -c conda-forge `
+            pip `
             cmake ninja flang flang_win-64 flang-rt_win-64 `
             openblas liblapack metis llvm-openmp
           conda list -n strumpack-win | Select-String -Pattern "flang|openblas|liblapack|metis|llvm-openmp|clang|cmake|ninja"
