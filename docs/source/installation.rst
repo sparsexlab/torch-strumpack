@@ -1,53 +1,76 @@
 Installation
 ============
 
-torch-strumpack ships **prebuilt, self-contained wheels on GitHub Releases**
-— it is **not** published to PyPI. Each release carries one wheel per backend;
-pick the wheel that matches your hardware and install it by URL.
+**torch-strumpack is cross-platform: it runs on Linux, Windows, and macOS.**
+It ships **prebuilt, self-contained wheels on GitHub Releases** (it is **not**
+published to PyPI). Each release carries one wheel per platform/backend; pick
+the wheel that matches your operating system and hardware and install it by URL.
 
 Browse every asset on the
 `Releases page <https://github.com/sparsexlab/torch-strumpack/releases>`_.
 
-Wheel matrix
-------------
+Cross-platform wheel matrix
+---------------------------
 
 .. list-table::
    :header-rows: 1
-   :widths: 20 20 25 35
+   :widths: 14 24 22 22 18
 
-   * - Platform
+   * - OS / arch
      - Backend (build tag)
      - Python
      - GPU runtime
-   * - Linux x86_64
+     - Wheel status
+   * - **Linux** x86_64
      - CPU (``0_cpu``)
      - 3.10 / 3.11 / 3.12 / 3.13
      - none (CPU-only)
-   * - Linux x86_64
+     - ✓ available
+   * - **Linux** x86_64
      - NVIDIA CUDA 12.x (``0_cuda12x``)
      - 3.10 / 3.11 / 3.12 / 3.13
      - CUDA 12.x driver
-   * - Linux x86_64
+     - ✓ available
+   * - **Linux** x86_64
      - AMD ROCm 6.x (``0_rocm6x``)
      - 3.10 / 3.11 / 3.12 / 3.13
      - ROCm 6.x driver
-   * - macOS arm64
+     - ✓ available
+   * - **Windows** x86_64
      - CPU (``0_cpu``)
      - 3.10 / 3.11 / 3.12 / 3.13
      - none (CPU-only)
+     - building via CI
+   * - **macOS** arm64
+     - CPU (``0_cpu``)
+     - 3.10 / 3.11 / 3.12 / 3.13
+     - none (CPU-only)
+     - ✓ available
 
 The filename build tag (``0_cpu`` / ``0_cuda12x`` / ``0_rocm6x``) marks the
-backend. CPU math dependencies (OpenBLAS / METIS / libgomp) are bundled inside
-the wheel; the GPU runtime (CUDA / ROCm) is provided by your driver install.
+backend. CPU math dependencies (OpenBLAS / METIS / OpenMP runtime) are bundled
+inside the wheel; the GPU runtime (CUDA / ROCm) is provided by your driver
+install.
 
-.. note::
+Per-platform support
+--------------------
 
-   **Windows status:** a **Windows CPU build now works** — STRUMPACK builds
-   under Windows with **clang-cl + flang** and passes correctness checks
-   (residual ``1.69e-16``). However, a **prebuilt Windows wheel via CI is still
-   being added**. So today: *Windows CPU is supported (build it yourself via
-   clang-cl + flang); a prebuilt Windows wheel is pending.* There is no
-   published Windows wheel yet.
+**Linux** — first-tier platform. CPU, NVIDIA CUDA 12.x, and AMD ROCm 6.x
+wheels are published for CPython 3.10–3.13. STRUMPACK is built from source per
+backend (GCC/gfortran + OpenBLAS/LAPACK + METIS, plus CUDA or HIP) and bundled
+with ``auditwheel``.
+
+**Windows** (x86_64, CPU) — supported. STRUMPACK builds natively on Windows
+with the **clang-cl** C/C++ compiler and the **flang** Fortran compiler
+(conda-forge LLVM toolchain), linked against MSVC-built PyTorch. The build is
+proven on a real Windows box — a clean-environment solve reaches residual
+``1.69e-16``. The prebuilt **Windows CPU wheel is being produced by CI** and
+will appear on the Releases page alongside the Linux and macOS wheels; until it
+lands you can also build it yourself with the same clang-cl + flang recipe (see
+``.github/workflows/wheels.yml`` for the exact toolchain and CMake flags).
+
+**macOS** (arm64, CPU) — supported. The CPU wheel is published for CPython
+3.10–3.13 (clang + gfortran + OpenBLAS/METIS, bundled with ``delocate``).
 
 torch ABI caveat — pick the matching wheel
 ------------------------------------------
