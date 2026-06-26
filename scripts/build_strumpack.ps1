@@ -28,6 +28,16 @@ $Conda   = $env:CONDA_PREFIX
 if (-not $Conda) { throw "CONDA_PREFIX not set -- activate the conda env first" }
 $LlvmBin = if ($env:LLVM_BIN) { $env:LLVM_BIN } else { "$Conda\Library\bin" }
 
+# CMake bakes the values of -DCMAKE_PREFIX_PATH (and friends) verbatim into the
+# *installed* strumpack-config.cmake (it re-exports them for transitive TPL
+# discovery). A Windows path with backslashes -- e.g. C:\Miniconda\...\Library
+# -- is then re-parsed by CMake when the extension build does
+# find_package(STRUMPACK), and \M / \L / ... trip "Invalid character escape".
+# CMake accepts forward slashes everywhere on Windows, so normalise every path
+# we hand to cmake -D to forward slashes. ($CondaFwd is for the -D args;
+# $Conda / $LlvmBin keep backslashes for native PowerShell Test-Path / IO.)
+$CondaFwd = $Conda.Replace('\','/')
+
 Write-Host "==> Building STRUMPACK ref=$Ref backend=cpu prefix=$Prefix (windows / clang-cl + flang)"
 Write-Host "    CONDA_PREFIX=$Conda"
 Write-Host "    LLVM_BIN=$LlvmBin"
@@ -44,7 +54,7 @@ if (-not (Test-Path "$Src\.git")) {
 $numericPatchTargets = @(
   "src\sparse\CSRGraph.cpp",
   "src\sparse\fronts\Front.cpp",
-  "src\sparse\MatrixReordering.cpp",
+  "src\sparse\ordering\MatrixReordering.cpp",
   "src\clustering\Clustering.hpp",
   "src\dense\DenseMatrix.cpp",
   "src\BLR\BLRMatrix.cpp"
@@ -78,16 +88,22 @@ $ClangLibWin = (Get-ChildItem -Recurse -Filter "clang_rt.builtins-x86_64.lib" "$
 $ClangLibDir = if ($ClangLibWin) { $ClangLibWin.Directory.FullName } else { "$Conda\Library\lib\clang\windows" }
 Write-Host "    clang runtime lib dir: $ClangLibDir"
 
+# forward-slash variants for every path handed to cmake -D (see $CondaFwd note)
+$PrefixFwd      = $Prefix.Replace('\','/')
+$ClangClFwd     = $ClangCl.Replace('\','/')
+$FlangFwd       = $Flang.Replace('\','/')
+$ClangLibDirFwd = $ClangLibDir.Replace('\','/')
+
 $cmakeArgs = @(
   "-G", "Ninja",
   "-DCMAKE_BUILD_TYPE=Release",
-  "-DCMAKE_INSTALL_PREFIX=$Prefix",
-  "-DCMAKE_C_COMPILER=$ClangCl",
-  "-DCMAKE_CXX_COMPILER=$ClangCl",
-  "-DCMAKE_Fortran_COMPILER=$Flang",
+  "-DCMAKE_INSTALL_PREFIX=$PrefixFwd",
+  "-DCMAKE_C_COMPILER=$ClangClFwd",
+  "-DCMAKE_CXX_COMPILER=$ClangClFwd",
+  "-DCMAKE_Fortran_COMPILER=$FlangFwd",
   "-DCMAKE_LINKER=link",
-  "-DCMAKE_EXE_LINKER_FLAGS=/LIBPATH:`"$ClangLibDir`"",
-  "-DCMAKE_SHARED_LINKER_FLAGS=/LIBPATH:`"$ClangLibDir`"",
+  "-DCMAKE_EXE_LINKER_FLAGS=/LIBPATH:`"$ClangLibDirFwd`"",
+  "-DCMAKE_SHARED_LINKER_FLAGS=/LIBPATH:`"$ClangLibDirFwd`"",
   "-DSTRUMPACK_USE_MPI=OFF",
   "-DSTRUMPACK_USE_OPENMP=ON",
   "-DTPL_ENABLE_METIS=ON",
@@ -101,12 +117,13 @@ $cmakeArgs = @(
   # exported and no import lib (strumpack.lib) is produced -- the nanobind
   # extension would then fail to link. Auto-export all symbols.
   "-DCMAKE_WINDOWS_EXPORT_ALL_SYMBOLS=ON",
-  # point BLAS/LAPACK/METIS at the conda env
-  "-DCMAKE_PREFIX_PATH=$Conda\Library",
-  "-DTPL_METIS_INCLUDE_DIRS=$Conda\Library\include",
-  "-DTPL_METIS_LIBRARIES=$Conda\Library\lib\metis.lib",
-  "-DBLAS_LIBRARIES=$Conda\Library\lib\openblas.lib",
-  "-DLAPACK_LIBRARIES=$Conda\Library\lib\openblas.lib"
+  # point BLAS/LAPACK/METIS at the conda env (forward slashes: these get baked
+  # into the installed strumpack-config.cmake and re-parsed by find_package)
+  "-DCMAKE_PREFIX_PATH=$CondaFwd/Library",
+  "-DTPL_METIS_INCLUDE_DIRS=$CondaFwd/Library/include",
+  "-DTPL_METIS_LIBRARIES=$CondaFwd/Library/lib/metis.lib",
+  "-DBLAS_LIBRARIES=$CondaFwd/Library/lib/openblas.lib",
+  "-DLAPACK_LIBRARIES=$CondaFwd/Library/lib/openblas.lib"
 )
 
 Remove-Item -Recurse -Force "$Src\build" -ErrorAction SilentlyContinue

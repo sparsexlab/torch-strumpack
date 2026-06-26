@@ -13,8 +13,14 @@ execute_process(
 list(APPEND CMAKE_PREFIX_PATH "${NB_CMAKE_DIR}")
 find_package(nanobind CONFIG REQUIRED)
 
-# ROCm deps that STRUMPACK's HIP build links (roc::hipblas, roc::rocsolver, ...)
-# Must be found BEFORE STRUMPACK so its imported targets resolve.
+# ROCm deps that STRUMPACK's HIP build links (roc::hipblas, roc::rocsolver,
+# roc::rocthrust, ...). These imported targets are carried transitively by
+# STRUMPACK::strumpack, so they MUST be found BEFORE find_package(STRUMPACK)
+# or the link `add_library(... STRUMPACK::strumpack ...)` fails with
+# "links to target roc::<X> but the target was not found".
+# rocthrust (-> roc::rocthrust) and its dep rocprim are required in addition
+# to the blas/sparse/solver libs; mirror build_strumpack.sh's ROCM_PATH on
+# CMAKE_PREFIX_PATH so all the *-config.cmake dirs under $ROCM_PATH resolve.
 if(DEFINED ENV{ROCM_PATH})
   list(APPEND CMAKE_PREFIX_PATH $ENV{ROCM_PATH})
 else()
@@ -26,6 +32,8 @@ find_package(hipsparse QUIET)
 find_package(rocblas QUIET)
 find_package(rocsolver QUIET)
 find_package(rocsparse QUIET)
+find_package(rocprim QUIET)
+find_package(rocthrust QUIET)
 
 # CUDA deps that STRUMPACK's CUDA build links (CUDA::cublas, CUDA::cusolver, ...)
 find_package(CUDAToolkit QUIET)

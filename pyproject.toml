@@ -23,4 +23,6 @@ dev = ["pytest", "scipy"]
 include = ["torch_strumpack*"]
 
 [tool.setuptools.package-data]
-torch_strumpack = ["*.so"]
+# .so  -> Linux + macOS CPython extension; .pyd -> Windows extension;
+# .dll -> native libs (strumpack/openblas/metis/libomp) delvewheel vendors in.
+torch_strumpack = ["*.so", "*.pyd", "*.dll"]

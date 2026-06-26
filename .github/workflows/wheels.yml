@@ -28,9 +28,10 @@ permissions:
 jobs:
   # ------------------------------------------------------------------ #
   # CPU wheels — Linux manylinux_2_28 x86_64.                           #
-  # Windows/macOS CPU are left as commented matrix entries below: they  #
-  # need a BLAS/LAPACK + METIS toolchain that is non-trivial to land on #
-  # those runners, so we ship Linux CPU first and grow from there.      #
+  # macOS (arm64) and Windows CPU jobs follow below; each lands its own #
+  # BLAS/LAPACK + METIS toolchain (Homebrew on macOS, conda-forge LLVM  #
+  # clang-cl + flang on Windows) so torch-strumpack ships CPU wheels    #
+  # for all three platforms.                                            #
   # ------------------------------------------------------------------ #
   cpu_linux:
     name: cpu / linux / py${{ matrix.python }}
@@ -51,11 +52,18 @@ jobs:
         run: |
           set -e
           # manylinux_2_28 == AlmaLinux 8. EPEL provides metis + openblas.
+          # NOTE: do NOT install EL8 `ninja-build` (1.8.2) — CMake's Ninja
+          # generator needs Ninja >= 1.10 to build STRUMPACK's Fortran sources.
+          # The pypa image already ships a modern ninja via pip (use that).
           dnf install -y epel-release || yum install -y epel-release
-          dnf install -y ninja-build gcc-gfortran cmake \
+          dnf install -y gcc-gfortran cmake \
                           openblas-devel lapack-devel metis-devel || \
-          yum install -y ninja-build gcc-gfortran cmake \
+          yum install -y gcc-gfortran cmake \
                           openblas-devel lapack-devel metis-devel
+          # modern ninja (>= 1.10) from PyPI, onto PATH for cmake -G Ninja
+          /opt/python/cp312-cp312/bin/python -m pip install --upgrade ninja
+          ln -sf /opt/python/cp312-cp312/bin/ninja /usr/local/bin/ninja
+          ninja --version
 
       - name: Build STRUMPACK (CPU)
         run: bash scripts/build_strumpack.sh
@@ -105,11 +113,16 @@ jobs:
       - name: Install native build deps
         run: |
           set -e
+          # See cpu_linux: EL8 ninja-build (1.8.2) is too old for STRUMPACK's
+          # Fortran sources (CMake Ninja generator needs >= 1.10); use pip ninja.
           dnf install -y epel-release || yum install -y epel-release
-          dnf install -y ninja-build gcc-gfortran cmake \
+          dnf install -y gcc-gfortran cmake \
                           openblas-devel lapack-devel metis-devel || \
-          yum install -y ninja-build gcc-gfortran cmake \
+          yum install -y gcc-gfortran cmake \
                           openblas-devel lapack-devel metis-devel
+          /opt/python/cp312-cp312/bin/python -m pip install --upgrade ninja
+          ln -sf /opt/python/cp312-cp312/bin/ninja /usr/local/bin/ninja
+          ninja --version
 
       - name: Install CUDA toolkit ${{ matrix.cuda }}
         run: |
@@ -121,6 +134,19 @@ jobs:
           dnf install -y "cuda-toolkit-${CU/./-}" || dnf install -y cuda-toolkit
           echo "/usr/local/cuda/bin" >> "$GITHUB_PATH"
           echo "CUDACXX=/usr/local/cuda/bin/nvcc" >> "$GITHUB_ENV"
+          # CUDA 12.4's nvcc rejects gcc > 13 ("unsupported GNU version"), but
+          # the manylinux_2_28 image's default toolchain is gcc-toolset-14.
+          # Install gcc-toolset-13 and pin nvcc's host compiler to it.
+          dnf install -y gcc-toolset-13 gcc-toolset-13-gcc-gfortran || \
+          yum install -y gcc-toolset-13 gcc-toolset-13-gcc-gfortran
+          GT13=/opt/rh/gcc-toolset-13/root/usr/bin
+          echo "CUDAHOSTCXX=$GT13/g++" >> "$GITHUB_ENV"
+          # Build STRUMPACK's C/C++/Fortran with the gcc-13 toolset too, so the
+          # CUDA device build and the host objects use a consistent compiler.
+          echo "CC=$GT13/gcc" >> "$GITHUB_ENV"
+          echo "CXX=$GT13/g++" >> "$GITHUB_ENV"
+          echo "FC=$GT13/gfortran" >> "$GITHUB_ENV"
+          echo "CMAKE_Fortran_COMPILER=$GT13/gfortran" >> "$GITHUB_ENV"
 
       - name: Build STRUMPACK (CUDA)
         run: bash scripts/build_strumpack.sh
@@ -153,7 +179,13 @@ jobs:
   rocm_linux:
     name: rocm / linux / py${{ matrix.python }}
     runs-on: ubuntu-22.04
-    container: rocm/dev-ubuntu-22.04:6.2.4-complete
+    # NOTE: use the SLIM base image (~1GB), not `-complete` (~5.5GB). The
+    # complete image's ROCm math libs unpack to >30GB and overflow the
+    # ubuntu-22.04 runner's root disk -> "no space left on device" at
+    # container init (job never even starts). The base image ships the HIP
+    # compiler + the ROCm apt repo, so we apt-install only the math/dev
+    # libs STRUMPACK actually links (rocsparse/rocsolver/hipblas/rocblas).
+    container: rocm/dev-ubuntu-22.04:6.2.4
     strategy:
       fail-fast: false
       matrix:
@@ -176,7 +208,12 @@ jobs:
             git cmake ninja-build gfortran \
             libopenblas-dev liblapack-dev libmetis-dev \
             python3-pip patchelf software-properties-common
-          # rocsparse/rocsolver/hipblas come with the rocm *-complete image.
+          # The base rocm/dev image has the HIP compiler + ROCm apt repo but
+          # NOT the math libs, so pull the dev packages STRUMPACK's HIP build
+          # links against (these are preinstalled only in the -complete image).
+          apt-get install -y --no-install-recommends \
+            rocsparse-dev rocsolver-dev hipblas-dev rocblas-dev hipsparse-dev \
+            rocprim-dev rocthrust-dev hipcub-dev
 
       - name: Setup Python ${{ matrix.python }}
         uses: actions/setup-python@v5
@@ -200,21 +237,227 @@ jobs:
           name: wheel-rocm-linux-py${{ matrix.python }}
           path: dist-final/*.whl
 
+  # ------------------------------------------------------------------ #
+  # CPU wheels — macOS (arm64 macos-14 + x86_64 macos-13).              #
+  # Homebrew supplies gcc (=> gfortran, which STRUMPACK hard-requires), #
+  # openblas (BLAS+LAPACK) and metis. STRUMPACK is built no-MPI /       #
+  # OpenMP-only, then delocate bundles the dylibs and stamps the        #
+  # macosx_<ver>_<arch> platform tag so these wheels don't collide      #
+  # with the linux cpu wheels as Release assets.                        #
+  # ------------------------------------------------------------------ #
+  cpu_macos:
+    name: cpu / macos-${{ matrix.arch }} / py${{ matrix.python }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Apple Silicon only. GitHub is retiring the Intel macOS (macos-13 /
+        # x86_64) runners, so those jobs queue indefinitely and never get a
+        # runner; arm64 (macos-14) covers current Macs. Re-add x86_64 if a
+        # working Intel macOS runner becomes available again.
+        arch: [arm64]
+        python: ["3.10", "3.11", "3.12", "3.13"]
+        include:
+          - { arch: arm64,  runner: macos-14, deployment: "14.0" }
+    env:
+      STRUMPACK_BACKEND: cpu
+      STRUMPACK_PREFIX: ${{ github.workspace }}/strumpack-prefix
+      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.deployment }}
+      PY: ${{ matrix.python }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install native build deps (gcc/gfortran, openblas, metis, libomp, ninja)
+        run: |
+          set -e
+          # libomp: STRUMPACK builds with OpenMP, so its installed CMake config
+          # does find_dependency(OpenMP). The binding extension is compiled with
+          # AppleClang, which needs Homebrew libomp to satisfy find_package(OpenMP)
+          # (otherwise: "Could NOT find OpenMP_C / OpenMP_CXX").
+          brew install gcc openblas metis libomp ninja cmake || true
+          # surface the Homebrew gfortran for build_strumpack.sh autodetection
+          ls -1 "$(brew --prefix)"/bin/gfortran* || true
+
+      - name: Setup Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Build STRUMPACK (CPU, no-MPI, OpenMP)
+        run: bash scripts/build_strumpack.sh
+
+      - name: Build + repair (delocate) + tag wheel
+        env:
+          STRUMPACK_DIR: ${{ github.workspace }}/strumpack-prefix/lib/cmake/STRUMPACK
+          PYBIN: ""   # use the setup-python interpreter on PATH
+          # Build the .cpu wheel against CPU torch (mac wheels are CPU-only).
+          TORCH_INDEX_URL: https://download.pytorch.org/whl/cpu
+          # The python.org CPython from setup-python is a universal2 build, so
+          # `build` would stamp the wheel `..._universal2`. But the extension is
+          # single-arch (built on this runner), and delocate 0.13 hard-errors:
+          # "Failed to find any binary with the required architecture: 'x86_64'".
+          # Pin the wheel platform tag + compiler to this runner's arch so the
+          # wheel is tagged macosx_<ver>_<arch> (arm64 / x86_64), not universal2.
+          _PYTHON_HOST_PLATFORM: macosx-${{ matrix.deployment }}-${{ matrix.arch }}
+          ARCHFLAGS: -arch ${{ matrix.arch }}
+        run: bash scripts/ci_build_wheel.sh cpu
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-cpu-macos-${{ matrix.arch }}-py${{ matrix.python }}
+          path: dist-final/*.whl
+
   # ================================================================== #
-  # Windows / macOS CPU — DISABLED until the BLAS/LAPACK+METIS          #
-  # toolchain is wired up. Kept here as the explicit next step rather   #
-  # than a silently-missing target. To enable, add a job that:         #
-  #   * installs OpenBLAS+METIS (vcpkg on Windows, brew on macOS),      #
-  #   * runs scripts/build_strumpack.sh,                                #
-  #   * builds the wheel and repairs with delvewheel / delocate.        #
+  # Windows CPU — STRUMPACK built with the conda-forge LLVM toolchain   #
+  # (clang-cl for C/C++, flang for Fortran) linked against MSVC's       #
+  # link.exe + CRT, so the resulting DLL is ABI-compatible with         #
+  # MSVC-built torch and the nanobind extension. Proven on a real       #
+  # Windows box (tb16): clean-env solve residual 1.69e-16. The recipe   #
+  # lives in scripts/build_strumpack.ps1 + scripts/build_wheel.ps1;     #
+  # delvewheel bundles strumpack/openblas/metis/libomp (torch DLLs      #
+  # excluded) and stamps the win_amd64 platform tag.                    #
   # ================================================================== #
+  cpu_windows:
+    name: cpu / windows / py${{ matrix.python }}
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13"]
+    env:
+      STRUMPACK_BACKEND: cpu
+      STRUMPACK_PREFIX: ${{ github.workspace }}\strumpack-prefix
+      STRUMPACK_SRC: ${{ github.workspace }}\STRUMPACK
+      PY: ${{ matrix.python }}
+    defaults:
+      run:
+        # Run every step inside the conda env so clang-cl/flang/cmake/ninja and
+        # the BLAS/LAPACK/METIS libs are on PATH. pwsh hosts the .ps1 scripts.
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      # MSVC for link.exe + the CRT (clang-cl links with MSVC's linker).
+      - name: Set up MSVC (link.exe + CRT)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      # Miniconda hosts the conda-forge LLVM toolchain (clang-cl + flang) and
+      # the math TPLs. flang-rt_win-64 is the Fortran runtime — MANDATORY, or
+      # STRUMPACK's Fortran objects fail to link.
+      - name: Set up Miniconda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          channels: conda-forge
+          channel-priority: strict
+          activate-environment: strumpack-win
+          python-version: ${{ matrix.python }}
+
+      - name: Install build toolchain + math TPLs (conda-forge)
+        run: |
+          conda install -y -n strumpack-win -c conda-forge `
+            pip `
+            cmake ninja flang flang_win-64 flang-rt_win-64 `
+            openblas liblapack metis llvm-openmp
+          conda list -n strumpack-win | Select-String -Pattern "flang|openblas|liblapack|metis|llvm-openmp|clang|cmake|ninja"
+
+      - name: Install Python build deps (CPU torch + nanobind + delvewheel)
+        run: |
+          python -m pip install --upgrade pip wheel build delvewheel nanobind numpy
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu "torch>=2.1"
+
+      - name: Build STRUMPACK (CPU, clang-cl + flang)
+        run: pwsh scripts/build_strumpack.ps1
+
+      - name: Build + delvewheel + tag wheel
+        env:
+          STRUMPACK_DIR: ${{ github.workspace }}\strumpack-prefix\lib\cmake\STRUMPACK
+          TORCH_INDEX_URL: https://download.pytorch.org/whl/cpu
+        run: pwsh scripts/build_wheel.ps1 cpu
+
+      # Validate the *installed* wheel (with its bundled DLLs + delvewheel
+      # loader) before publishing: import, is_available(), and a real solve.
+      # Imported from a neutral CWD so the installed package is used rather
+      # than the in-tree torch_strumpack\ (whose .pyd has no vendored DLLs).
+      - name: Smoke-test the wheel
+        run: |
+          $whl = Get-ChildItem dist-final\*.whl | Select-Object -First 1
+          python -m pip install --no-deps $whl.FullName
+          Push-Location $env:TEMP
+          python -c @'
+          import torch_strumpack as ts
+          from torch_strumpack import _core
+          print('version', ts.__version__)
+          print('available', ts.is_available())
+          if _core._ext is None:
+              import traceback
+              traceback.print_exception(type(_core._EXT_ERR), _core._EXT_ERR, _core._EXT_ERR.__traceback__)
+              raise SystemExit('extension did not load')
+          import torch
+          A = torch.tensor([[4.,1.,0.],[1.,3.,1.],[0.,1.,2.]], dtype=torch.float64)
+          b = torch.tensor([1.,2.,3.], dtype=torch.float64)
+          x = ts.spsolve(A.to_sparse_csr(), b)
+          r = (A @ x - b).norm().item()
+          print('solve residual', r)
+          assert r < 1e-10, f'residual too large: {r}'
+          print('OK: import + is_available + solve all pass')
+          '@
+          Pop-Location
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-cpu-windows-py${{ matrix.python }}
+          path: dist-final/*.whl
+
+  # ------------------------------------------------------------------ #
+  # Publish the Windows wheels as soon as the (fast) Windows builds     #
+  # finish, WITHOUT waiting on the ~24h emulated CUDA/ROCm Linux jobs   #
+  # that the all-platform `publish` job (below) blocks on. Attaches     #
+  # only the wheel-cpu-windows-* artifacts to the Release.              #
+  # ------------------------------------------------------------------ #
+  publish_windows:
+    name: Attach Windows wheels to GitHub Release
+    needs: [cpu_windows]
+    if: always() && (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download Windows wheels
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-cpu-windows-*
+          path: dist
+          merge-multiple: true
+
+      - name: List collected Windows wheels
+        run: ls -la dist || echo "no windows wheels were produced"
+
+      - name: Resolve release tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ github.event.inputs.release_tag }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Attach Windows wheels to Release
+        if: hashFiles('dist/*.whl') != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          files: dist/*.whl
+          fail_on_unmatched_files: false
 
   # ------------------------------------------------------------------ #
   # Publish: attach every built wheel to the tag's GitHub Release.      #
   # ------------------------------------------------------------------ #
   publish:
     name: Attach wheels to GitHub Release
-    needs: [cpu_linux, cuda_linux, rocm_linux]
+    needs: [cpu_linux, cuda_linux, rocm_linux, cpu_macos, cpu_windows]
     if: always() && (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     permissions:
