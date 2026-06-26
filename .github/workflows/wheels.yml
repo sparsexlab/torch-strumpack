@@ -28,9 +28,10 @@ permissions:
 jobs:
   # ------------------------------------------------------------------ #
   # CPU wheels — Linux manylinux_2_28 x86_64.                           #
-  # Windows/macOS CPU are left as commented matrix entries below: they  #
-  # need a BLAS/LAPACK + METIS toolchain that is non-trivial to land on #
-  # those runners, so we ship Linux CPU first and grow from there.      #
+  # macOS (arm64) and Windows CPU jobs follow below; each lands its own #
+  # BLAS/LAPACK + METIS toolchain (Homebrew on macOS, conda-forge LLVM  #
+  # clang-cl + flang on Windows) so torch-strumpack ships CPU wheels    #
+  # for all three platforms.                                            #
   # ------------------------------------------------------------------ #
   cpu_linux:
     name: cpu / linux / py${{ matrix.python }}
@@ -307,49 +308,85 @@ jobs:
           path: dist-final/*.whl
 
   # ================================================================== #
-  # Windows CPU — DISABLED. STRUMPACK hard-requires a Fortran compiler  #
-  # (project(STRUMPACK LANGUAGES CXX C Fortran) + bundled LAPACK .f     #
-  # sources) and MSVC has none. Mixing a MinGW/Intel-Fortran STRUMPACK  #
-  # with the MSVC-built nanobind extension + MSVC torch is an unsolved  #
-  # ABI problem on the windows-2022 runner. A scaffold lives in         #
-  # scripts/build_strumpack.ps1 / scripts/build_wheel.ps1 for whoever   #
-  # lands a MinGW (or Intel oneAPI ifx) toolchain; re-enable then.      #
-  #                                                                     #
-  # # windows-cpu: STRUMPACK Fortran+METIS+BLAS via MSVC unresolved —   #
-  # #              needs a MinGW (or Intel ifx) Fortran toolchain.      #
-  # cpu_windows:                                                        #
-  #   name: cpu / windows / py${{ matrix.python }}                      #
-  #   runs-on: windows-2022                                             #
-  #   strategy:                                                         #
-  #     fail-fast: false                                                #
-  #     matrix:                                                         #
-  #       python: ["3.10", "3.11", "3.12", "3.13"]                      #
-  #   env:                                                              #
-  #     STRUMPACK_BACKEND: cpu                                          #
-  #     STRUMPACK_PREFIX: ${{ github.workspace }}\strumpack-prefix      #
-  #   steps:                                                            #
-  #     - uses: actions/checkout@v4                                     #
-  #     - name: Install BLAS/LAPACK + METIS (vcpkg)                     #
-  #       run: vcpkg install openblas metis                             #
-  #     - name: Setup Python                                            #
-  #       uses: actions/setup-python@v5                                 #
-  #       with: { python-version: "${{ matrix.python }}" }              #
-  #     - name: Build STRUMPACK (CPU)                                   #
-  #       run: pwsh scripts/build_strumpack.ps1                         #
-  #     - name: Build + delvewheel + tag                                #
-  #       run: pwsh scripts/build_wheel.ps1 cpu                         #
-  #     - uses: actions/upload-artifact@v4                              #
-  #       with:                                                         #
-  #         name: wheel-cpu-windows-py${{ matrix.python }}              #
-  #         path: dist-final/*.whl                                      #
+  # Windows CPU — STRUMPACK built with the conda-forge LLVM toolchain   #
+  # (clang-cl for C/C++, flang for Fortran) linked against MSVC's       #
+  # link.exe + CRT, so the resulting DLL is ABI-compatible with         #
+  # MSVC-built torch and the nanobind extension. Proven on a real       #
+  # Windows box (tb16): clean-env solve residual 1.69e-16. The recipe   #
+  # lives in scripts/build_strumpack.ps1 + scripts/build_wheel.ps1;     #
+  # delvewheel bundles strumpack/openblas/metis/libomp (torch DLLs      #
+  # excluded) and stamps the win_amd64 platform tag.                    #
   # ================================================================== #
+  cpu_windows:
+    name: cpu / windows / py${{ matrix.python }}
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13"]
+    env:
+      STRUMPACK_BACKEND: cpu
+      STRUMPACK_PREFIX: ${{ github.workspace }}\strumpack-prefix
+      STRUMPACK_SRC: ${{ github.workspace }}\STRUMPACK
+      PY: ${{ matrix.python }}
+    defaults:
+      run:
+        # Run every step inside the conda env so clang-cl/flang/cmake/ninja and
+        # the BLAS/LAPACK/METIS libs are on PATH. pwsh hosts the .ps1 scripts.
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      # MSVC for link.exe + the CRT (clang-cl links with MSVC's linker).
+      - name: Set up MSVC (link.exe + CRT)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      # Miniconda hosts the conda-forge LLVM toolchain (clang-cl + flang) and
+      # the math TPLs. flang-rt_win-64 is the Fortran runtime — MANDATORY, or
+      # STRUMPACK's Fortran objects fail to link.
+      - name: Set up Miniconda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          channels: conda-forge
+          channel-priority: strict
+          activate-environment: strumpack-win
+          python-version: ${{ matrix.python }}
+
+      - name: Install build toolchain + math TPLs (conda-forge)
+        run: |
+          conda install -y -n strumpack-win -c conda-forge `
+            cmake ninja flang flang_win-64 flang-rt_win-64 `
+            openblas liblapack metis llvm-openmp
+          conda list -n strumpack-win | Select-String -Pattern "flang|openblas|liblapack|metis|llvm-openmp|clang|cmake|ninja"
+
+      - name: Install Python build deps (CPU torch + nanobind + delvewheel)
+        run: |
+          python -m pip install --upgrade pip wheel build delvewheel nanobind numpy
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu "torch>=2.1"
+
+      - name: Build STRUMPACK (CPU, clang-cl + flang)
+        run: pwsh scripts/build_strumpack.ps1
+
+      - name: Build + delvewheel + tag wheel
+        env:
+          STRUMPACK_DIR: ${{ github.workspace }}\strumpack-prefix\lib\cmake\STRUMPACK
+          TORCH_INDEX_URL: https://download.pytorch.org/whl/cpu
+        run: pwsh scripts/build_wheel.ps1 cpu
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-cpu-windows-py${{ matrix.python }}
+          path: dist-final/*.whl
 
   # ------------------------------------------------------------------ #
   # Publish: attach every built wheel to the tag's GitHub Release.      #
   # ------------------------------------------------------------------ #
   publish:
     name: Attach wheels to GitHub Release
-    needs: [cpu_linux, cuda_linux, rocm_linux, cpu_macos]
+    needs: [cpu_linux, cuda_linux, rocm_linux, cpu_macos, cpu_windows]
     if: always() && (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     permissions:

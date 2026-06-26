@@ -11,6 +11,18 @@ the same ``_core`` signatures with no change above it.
 
 from __future__ import annotations
 
+import os
+
+# Windows OpenMP double-runtime guard. The CPU wheel bundles the LLVM OpenMP
+# runtime (libomp, used by the clang-cl-built STRUMPACK extension) while torch
+# ships Intel's libiomp5md. With two OpenMP runtimes loaded in one process, the
+# Intel runtime aborts the program ("OMP: Error #15: Initializing libomp..."
+# / libiomp5md, multiple copies). Setting KMP_DUPLICATE_LIB_OK before torch /
+# the extension is imported downgrades that fatal abort to a warning. Must be
+# set BEFORE `from . import _core` (which imports torch and _strumpack_ext).
+# No-op on Linux/macOS, so it is safe to set unconditionally.
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+
 from . import _core
 from .autograd import spsolve
 
